@@ -11,12 +11,26 @@ import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
+import android.content.ClipData;
+import android.content.ClipboardManager;
+import android.content.Context;
+import java.util.UUID;
 
 public class MainActivity extends Activity {
     private static final String RUN_PERMISSION = "com.termux.permission.RUN_COMMAND";
     private static final int RUN_PERMISSION_REQUEST = 1001;
 
     private TextView status;
+
+    public static String bridgeToken(Context context) {
+        android.content.SharedPreferences p = context.getSharedPreferences("bridge", MODE_PRIVATE);
+        String token = p.getString("token", "");
+        if (token.isEmpty()) {
+            token = UUID.randomUUID().toString().replace("-", "") + UUID.randomUUID().toString().replace("-", "");
+            p.edit().putString("token", token).apply();
+        }
+        return token;
+    }
 
     @Override
     protected void onCreate(Bundle state) {
@@ -28,7 +42,7 @@ public class MainActivity extends Activity {
         body.setPadding(pad, pad, pad, pad);
 
         TextView title = new TextView(this);
-        title.setText("Hermes Bridge 0.2");
+        title.setText("Hermes Bridge 0.3");
         title.setTextSize(27);
         title.setTypeface(Typeface.DEFAULT_BOLD);
         body.addView(title);
@@ -42,6 +56,15 @@ public class MainActivity extends Activity {
         status.setTextSize(16);
         status.setPadding(0, dp(8), 0, dp(12));
         body.addView(status);
+
+        TextView rpc = new TextView(this);
+        rpc.setText("\n本地 RPC：127.0.0.1:18473\nToken（复制到 Termux ~/.hauto/bridge-token）：\n" + bridgeToken(this));
+        rpc.setTextIsSelectable(true);
+        body.addView(rpc);
+        body.addView(button("复制 RPC Token", () -> {
+            ClipboardManager cm = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+            cm.setPrimaryClip(ClipData.newPlainText("Hermes Bridge token", bridgeToken(this)));
+        }));
 
         body.addView(button("1. 打开无障碍设置", () ->
                 startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))));

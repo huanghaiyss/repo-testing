@@ -6,6 +6,8 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.content.ComponentName;
+import android.content.pm.PackageManager;
 import android.graphics.Path;
 import android.graphics.Rect;
 import android.os.Build;
@@ -27,7 +29,9 @@ public class BridgeAccessibilityService extends AccessibilityService {
     private static volatile BridgeAccessibilityService instance;
     private final Handler main = new Handler(Looper.getMainLooper());
     private volatile String lastPackage = "";
+    private volatile String lastActivity = "";
     private BroadcastReceiver screenReceiver;
+    private BridgeHttpServer httpServer;
 
     interface Task { JSONObject run() throws Exception; }
 
@@ -37,6 +41,8 @@ public class BridgeAccessibilityService extends AccessibilityService {
     protected void onServiceConnected() {
         super.onServiceConnected();
         instance = this;
+        httpServer = new BridgeHttpServer(this, MainActivity.bridgeToken(this));
+        httpServer.start();
         registerDeviceEvents();
         EventDispatcher.dispatch(this, "bridge_connected", new JSONObject());
     }
@@ -47,13 +53,16 @@ public class BridgeAccessibilityService extends AccessibilityService {
         if (event.getEventType() != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return;
 
         String current = event.getPackageName().toString();
-        if (current.equals(lastPackage)) return;
+        String activity = event.getClassName() == null ? "" : event.getClassName().toString();
+        if (current.equals(lastPackage) && activity.equals(lastActivity)) return;
 
         lastPackage = current;
+        lastActivity = activity;
         try {
             EventDispatcher.dispatch(this, "foreground_app",
                     new JSONObject()
                             .put("package", current)
+                            .put("activity", activity)
                             .put("accessibility_event_type", event.getEventType()));
         } catch (Throwable ignored) {
         }
@@ -64,6 +73,8 @@ public class BridgeAccessibilityService extends AccessibilityService {
     @Override
     public void onDestroy() {
         unregisterDeviceEvents();
+        if (httpServer != null) httpServer.stop();
+        httpServer = null;
         instance = null;
         super.onDestroy();
     }
@@ -120,6 +131,8 @@ public class BridgeAccessibilityService extends AccessibilityService {
         return lastPackage;
     }
 
+    public String currentActivity() { return lastActivity; }
+
     public JSONObject execute(JSONObject command) {
         return onMain(() -> executeMain(command));
     }
@@ -131,11 +144,21 @@ public class BridgeAccessibilityService extends AccessibilityService {
                 return ok()
                         .put("service_connected", true)
                         .put("package", currentPackage())
-                        .put("bridge_version", "0.2.1")
+                        .put("activity", currentActivity())
+                        .put("foreground", !currentPackage().isEmpty())
+                        .put("bridge_version", "0.3.0")
+                        .put("transport", "loopback_http")
+                        .put("transport_port", BridgeHttpServer.PORT)
                         .put("termux_run_permission", EventDispatcher.hasRunCommandPermission(this))
                         .put("notification_listener_connected", NotificationBridgeService.isConnected());
             case "dump":
                 return dump(c.optInt("max_nodes", 300));
+            case "launch_app":
+                return launchApp(c.optString("package", ""));
+            case "launch_activity":
+                return launchActivity(c.optString("package", ""), c.optString("activity", ""));
+            case "find":
+                return findSelector(c.optJSONObject("selector"));
             case "click_text":
                 return clickText(c.optString("text", ""), c.optBoolean("exact", true));
             case "click_id":
@@ -161,7 +184,54 @@ public class BridgeAccessibilityService extends AccessibilityService {
         JSONArray nodes = new JSONArray();
         int[] count = {0};
         append(root, "0", 0, nodes, count, max);
-        return ok().put("package", text(root.getPackageName())).put("node_count", count[0]).put("truncated", count[0] >= max).put("nodes", nodes);
+        return ok().put("package", text(root.getPackageName())).put("activity", currentActivity()).put("node_count", count[0]).put("truncated", count[0] >= max).put("nodes", nodes);
+    }
+
+    private JSONObject launchApp(String packageName) throws Exception {
+        if (packageName.isEmpty()) return error("missing_package", "package is required");
+        Intent intent = getPackageManager().getLaunchIntentForPackage(packageName);
+        if (intent == null) return error("launch_intent_unavailable", "No exported launcher activity for " + packageName);
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
+        startActivity(intent);
+        return ok().put("launch_requested", true).put("package", packageName).put("foreground", packageName.equals(currentPackage()));
+    }
+
+    private JSONObject launchActivity(String packageName, String activity) throws Exception {
+        if (packageName.isEmpty() || activity.isEmpty()) return error("missing_component", "package and activity are required");
+        String name = activity.startsWith(".") ? packageName + activity : activity;
+        Intent intent = new Intent().setComponent(new ComponentName(packageName, name));
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
+        try {
+            startActivity(intent);
+            return ok().put("launch_requested", true).put("package", packageName).put("activity", name).put("foreground", packageName.equals(currentPackage()));
+        } catch (SecurityException denied) {
+            return error("ACTIVITY_NOT_EXPORTED", "Android denied direct Activity launch; use launcher navigation").put("package", packageName).put("activity", name);
+        }
+    }
+
+    private JSONObject findSelector(JSONObject selector) throws Exception {
+        if (selector == null) return error("missing_selector", "selector is required");
+        JSONObject all = dump(1000);
+        JSONArray matches = new JSONArray();
+        JSONArray nodes = all.optJSONArray("nodes");
+        if (nodes != null) for (int i = 0; i < nodes.length(); i++) {
+            JSONObject node = nodes.optJSONObject(i);
+            if (node != null && selectorMatches(node, selector)) matches.put(node);
+        }
+        return ok().put("package", currentPackage()).put("activity", currentActivity()).put("count", matches.length()).put("nodes", matches);
+    }
+
+    private boolean selectorMatches(JSONObject n, JSONObject s) {
+        if (s.has("text") && !s.optString("text").equals(n.optString("text"))) return false;
+        if (s.has("text_contains") && !n.optString("text").contains(s.optString("text_contains"))) return false;
+        if (s.has("desc") && !s.optString("desc").equals(n.optString("description"))) return false;
+        if (s.has("desc_contains") && !n.optString("description").contains(s.optString("desc_contains"))) return false;
+        if (s.has("id") && !s.optString("id").equals(n.optString("id"))) return false;
+        if (s.has("class") && !s.optString("class").equals(n.optString("class"))) return false;
+        if (s.has("package") && !s.optString("package").equals(n.optString("package"))) return false;
+        if (s.has("clickable") && s.optBoolean("clickable") != n.optBoolean("clickable")) return false;
+        if (s.has("editable") && s.optBoolean("editable") != n.optBoolean("editable")) return false;
+        return true;
     }
 
     private void append(AccessibilityNodeInfo n, String path, int depth, JSONArray out, int[] count, int max) throws Exception {
