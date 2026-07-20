@@ -44,16 +44,18 @@ public class BridgeAccessibilityService extends AccessibilityService {
     @Override
     public void onAccessibilityEvent(AccessibilityEvent event) {
         if (event == null || event.getPackageName() == null) return;
+        if (event.getEventType() != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return;
+
         String current = event.getPackageName().toString();
-        if (!current.equals(lastPackage)) {
-            lastPackage = current;
-            try {
-                EventDispatcher.dispatch(this, "foreground_app",
-                        new JSONObject()
-                                .put("package", current)
-                                .put("accessibility_event_type", event.getEventType()));
-            } catch (Throwable ignored) {
-            }
+        if (current.equals(lastPackage)) return;
+
+        lastPackage = current;
+        try {
+            EventDispatcher.dispatch(this, "foreground_app",
+                    new JSONObject()
+                            .put("package", current)
+                            .put("accessibility_event_type", event.getEventType()));
+        } catch (Throwable ignored) {
         }
     }
 
@@ -129,7 +131,7 @@ public class BridgeAccessibilityService extends AccessibilityService {
                 return ok()
                         .put("service_connected", true)
                         .put("package", currentPackage())
-                        .put("bridge_version", "0.2.0")
+                        .put("bridge_version", "0.2.1")
                         .put("termux_run_permission", EventDispatcher.hasRunCommandPermission(this))
                         .put("notification_listener_connected", NotificationBridgeService.isConnected());
             case "dump":
