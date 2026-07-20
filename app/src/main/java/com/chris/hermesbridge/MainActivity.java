@@ -2,7 +2,9 @@ package com.chris.hermesbridge;
 
 import android.app.Activity;
 import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.graphics.Typeface;
+import android.net.Uri;
 import android.os.Bundle;
 import android.provider.Settings;
 import android.widget.Button;
@@ -11,6 +13,9 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 
 public class MainActivity extends Activity {
+    private static final String RUN_PERMISSION = "com.termux.permission.RUN_COMMAND";
+    private static final int RUN_PERMISSION_REQUEST = 1001;
+
     private TextView status;
 
     @Override
@@ -23,13 +28,13 @@ public class MainActivity extends Activity {
         body.setPadding(pad, pad, pad, pad);
 
         TextView title = new TextView(this);
-        title.setText("Hermes Bridge");
+        title.setText("Hermes Bridge 0.2");
         title.setTextSize(27);
         title.setTypeface(Typeface.DEFAULT_BOLD);
         body.addView(title);
 
         TextView description = new TextView(this);
-        description.setText("\nAndroid 自动化桥接层。任务逻辑放在 Termux/Hermes，APK 负责读取和操作界面。\n");
+        description.setText("\nAndroid 自动化桥接层。任务、触发器和日志由 Termux/Hermes 负责。\n");
         description.setTextSize(16);
         body.addView(description);
 
@@ -38,20 +43,25 @@ public class MainActivity extends Activity {
         status.setPadding(0, dp(8), 0, dp(12));
         body.addView(status);
 
-        Button settings = new Button(this);
-        settings.setText("打开无障碍设置");
-        settings.setAllCaps(false);
-        settings.setOnClickListener(v -> startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)));
-        body.addView(settings);
+        body.addView(button("1. 打开无障碍设置", () ->
+                startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))));
 
-        Button refresh = new Button(this);
-        refresh.setText("刷新状态");
-        refresh.setAllCaps(false);
-        refresh.setOnClickListener(v -> refresh());
-        body.addView(refresh);
+        body.addView(button("2. 授予 Termux 命令权限", () ->
+                requestPermissions(new String[]{RUN_PERMISSION}, RUN_PERMISSION_REQUEST)));
+
+        body.addView(button("3. 打开通知使用权设置", () ->
+                startActivity(new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))));
+
+        body.addView(button("打开本应用系统信息", () -> {
+            Intent intent = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
+            intent.setData(Uri.parse("package:" + getPackageName()));
+            startActivity(intent);
+        }));
+
+        body.addView(button("刷新状态", this::refresh));
 
         TextView help = new TextView(this);
-        help.setText("\n授权完成后，在 Termux 测试：\n\nha status\nha dump\nha click-text \"确认\"\nha back\n\n若小米提示受限设置，请进入本应用的系统应用信息页，在右上角菜单允许受限设置。");
+        help.setText("\n全部授权完成后，在 Termux 测试：\n\nha status\nha events\nha run demo-back\n\n若小米阻止无障碍，请在本应用系统信息页右上角允许受限设置。\n若第二项没有弹窗，请在系统信息页的权限/其他权限中允许“在 Termux 环境中运行命令”。");
         help.setTextSize(15);
         help.setTypeface(Typeface.MONOSPACE);
         help.setTextIsSelectable(true);
@@ -68,13 +78,31 @@ public class MainActivity extends Activity {
         refresh();
     }
 
+    private Button button(String text, Runnable action) {
+        Button button = new Button(this);
+        button.setText(text);
+        button.setAllCaps(false);
+        button.setOnClickListener(v -> action.run());
+        return button;
+    }
+
     private void refresh() {
         BridgeAccessibilityService service = BridgeAccessibilityService.getInstance();
-        if (service == null) {
-            status.setText("无障碍服务：未连接\n前台应用：未知");
-        } else {
-            status.setText("无障碍服务：已连接\n前台应用：" + service.currentPackage());
-        }
+        boolean runGranted = checkSelfPermission(RUN_PERMISSION) == PackageManager.PERMISSION_GRANTED;
+        boolean notificationGranted = notificationAccessEnabled();
+
+        status.setText(
+                "无障碍服务：" + (service == null ? "未连接" : "已连接") +
+                "\nTermux 命令权限：" + (runGranted ? "已授权" : "未授权") +
+                "\n通知使用权：" + (notificationGranted ? "已授权" : "未授权") +
+                "\n通知监听连接：" + (NotificationBridgeService.isConnected() ? "已连接" : "未连接") +
+                "\n前台应用：" + (service == null ? "未知" : service.currentPackage()));
+    }
+
+    private boolean notificationAccessEnabled() {
+        String enabled = Settings.Secure.getString(
+                getContentResolver(), "enabled_notification_listeners");
+        return enabled != null && enabled.contains(getPackageName());
     }
 
     private int dp(int value) {
