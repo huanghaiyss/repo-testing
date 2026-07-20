@@ -358,7 +358,7 @@ public class BridgeAccessibilityService extends AccessibilityService {
             main.post(() -> {
                 try { result.set(task.run()); } catch (Throwable e) { failure.set(e); } finally { latch.countDown(); }
             });
-            if (!latch.await(5, TimeUnit.SECONDS)) return error("timeout", "Accessibility operation timed out");
+            if (!latch.await(12, TimeUnit.SECONDS)) return error("timeout", "Accessibility operation timed out");
             if (failure.get() != null) return error("operation_failed", failure.get().getClass().getSimpleName() + ": " + failure.get().getMessage());
             return result.get();
         } catch (Throwable e) {
