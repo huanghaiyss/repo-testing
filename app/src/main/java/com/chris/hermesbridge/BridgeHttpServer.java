@@ -12,9 +12,7 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.util.UUID;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.RejectedExecutionException;
+
 
 /** Loopback-only, authenticated JSON-RPC transport. */
 public final class BridgeHttpServer {
@@ -23,7 +21,7 @@ public final class BridgeHttpServer {
     private static final int MAX_BODY = 512 * 1024;
     private final BridgeAccessibilityService service;
     private final String token;
-    private ExecutorService workers;
+
     private volatile boolean running;
     private ServerSocket server;
     private Thread acceptThread;
@@ -36,14 +34,15 @@ public final class BridgeHttpServer {
     public synchronized void start() {
         if (running) return;
         try {
-            workers = Executors.newFixedThreadPool(2);
             server = new ServerSocket(PORT, 16, InetAddress.getByName("127.0.0.1"));
             running = true;
             acceptThread = new Thread(() -> {
                 while (running) {
                     try {
                         final Socket socket = server.accept();
-                        workers.execute(() -> handle(socket));
+                        // Deliberately serialize RPC calls: one bounded in-flight
+                        // Accessibility operation prevents duplicate UI actions.
+                        handle(socket);
                     } catch (Exception e) {
                         if (running) Log.e(TAG, "accept failed", e);
                     }
@@ -60,7 +59,6 @@ public final class BridgeHttpServer {
     public synchronized void stop() {
         running = false;
         try { if (server != null) server.close(); } catch (Exception ignored) { }
-        if (workers != null) workers.shutdownNow();
         server = null;
     }
 
