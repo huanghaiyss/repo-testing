@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Hermes Bridge</string>
+    <string name="service_name">Hermes Bridge 自动化服务</string>
+    <string name="service_description">让本机 Termux/Hermes 读取和操作当前 Android 界面。</string>
+</resources>
