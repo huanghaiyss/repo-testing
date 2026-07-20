@@ -9,6 +9,7 @@ import android.util.Log;
 import org.json.JSONObject;
 
 import java.nio.charset.StandardCharsets;
+import java.util.concurrent.ConcurrentHashMap;
 
 public final class EventDispatcher {
     private static final String TAG = "HermesBridge";
@@ -16,6 +17,8 @@ public final class EventDispatcher {
     private static final String TERMUX_PACKAGE = "com.termux";
     private static final String TERMUX_SERVICE = "com.termux.app.RunCommandService";
     private static final String EVENT_SCRIPT = "/data/data/com.termux/files/home/bin/ha-event";
+    private static final long DUPLICATE_WINDOW_MS = 1000;
+    private static final ConcurrentHashMap<String, Long> LAST_DISPATCH = new ConcurrentHashMap<>();
 
     private EventDispatcher() { }
 
@@ -25,10 +28,22 @@ public final class EventDispatcher {
 
     public static boolean dispatch(Context context, String type, JSONObject data) {
         try {
+            JSONObject safeData = data == null ? new JSONObject() : data;
+            String fingerprint = type + "|" + safeData.toString();
+            long now = System.currentTimeMillis();
+            Long previous = LAST_DISPATCH.put(fingerprint, now);
+            if (previous != null && now - previous < DUPLICATE_WINDOW_MS) {
+                return false;
+            }
+            if (LAST_DISPATCH.size() > 512) {
+                LAST_DISPATCH.clear();
+                LAST_DISPATCH.put(fingerprint, now);
+            }
+
             JSONObject event = new JSONObject()
                     .put("event", type)
-                    .put("timestamp_ms", System.currentTimeMillis())
-                    .put("data", data == null ? new JSONObject() : data);
+                    .put("timestamp_ms", now)
+                    .put("data", safeData);
 
             String encoded = Base64.encodeToString(
                     event.toString().getBytes(StandardCharsets.UTF_8),
