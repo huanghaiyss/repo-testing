@@ -33,12 +33,34 @@ jobs:
         with:
           gradle-version: '8.7'
 
-      - name: Build debug APK
-        run: gradle --no-daemon :app:assembleDebug
+      - name: Verify signing secrets
+        env:
+          HB_KEYSTORE_B64: ${{ secrets.HB_KEYSTORE_B64 }}
+          HB_STORE_PASSWORD: ${{ secrets.HB_STORE_PASSWORD }}
+          HB_KEY_ALIAS: ${{ secrets.HB_KEY_ALIAS }}
+          HB_KEY_PASSWORD: ${{ secrets.HB_KEY_PASSWORD }}
+        run: |
+          test -n "$HB_KEYSTORE_B64"
+          test -n "$HB_STORE_PASSWORD"
+          test -n "$HB_KEY_ALIAS"
+          test -n "$HB_KEY_PASSWORD"
+
+      - name: Restore signing keystore
+        env:
+          HB_KEYSTORE_B64: ${{ secrets.HB_KEYSTORE_B64 }}
+        run: printf '%s' "$HB_KEYSTORE_B64" | base64 --decode > "$RUNNER_TEMP/hermesbridge.jks"
+
+      - name: Build signed release APK
+        env:
+          HB_KEYSTORE_PATH: ${{ runner.temp }}/hermesbridge.jks
+          HB_STORE_PASSWORD: ${{ secrets.HB_STORE_PASSWORD }}
+          HB_KEY_ALIAS: ${{ secrets.HB_KEY_ALIAS }}
+          HB_KEY_PASSWORD: ${{ secrets.HB_KEY_PASSWORD }}
+        run: gradle --no-daemon :app:assembleRelease
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: HermesBridge-debug-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
+          path: app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
