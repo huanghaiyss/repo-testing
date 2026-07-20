@@ -23,7 +23,7 @@ public final class BridgeHttpServer {
     private static final int MAX_BODY = 512 * 1024;
     private final BridgeAccessibilityService service;
     private final String token;
-    private final ExecutorService workers = Executors.newFixedThreadPool(2);
+    private ExecutorService workers;
     private volatile boolean running;
     private ServerSocket server;
     private Thread acceptThread;
@@ -36,6 +36,7 @@ public final class BridgeHttpServer {
     public synchronized void start() {
         if (running) return;
         try {
+            workers = Executors.newFixedThreadPool(2);
             server = new ServerSocket(PORT, 16, InetAddress.getByName("127.0.0.1"));
             running = true;
             acceptThread = new Thread(() -> {
@@ -59,7 +60,7 @@ public final class BridgeHttpServer {
     public synchronized void stop() {
         running = false;
         try { if (server != null) server.close(); } catch (Exception ignored) { }
-        workers.shutdownNow();
+        if (workers != null) workers.shutdownNow();
         server = null;
     }
 
