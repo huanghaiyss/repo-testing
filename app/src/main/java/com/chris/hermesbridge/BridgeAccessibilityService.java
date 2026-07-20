@@ -2,8 +2,13 @@ package com.chris.hermesbridge;
 
 import android.accessibilityservice.AccessibilityService;
 import android.accessibilityservice.GestureDescription;
+import android.content.BroadcastReceiver;
+import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
 import android.graphics.Path;
 import android.graphics.Rect;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -22,6 +27,7 @@ public class BridgeAccessibilityService extends AccessibilityService {
     private static volatile BridgeAccessibilityService instance;
     private final Handler main = new Handler(Looper.getMainLooper());
     private volatile String lastPackage = "";
+    private BroadcastReceiver screenReceiver;
 
     interface Task { JSONObject run() throws Exception; }
 
@@ -31,12 +37,23 @@ public class BridgeAccessibilityService extends AccessibilityService {
     protected void onServiceConnected() {
         super.onServiceConnected();
         instance = this;
+        registerDeviceEvents();
+        EventDispatcher.dispatch(this, "bridge_connected", new JSONObject());
     }
 
     @Override
     public void onAccessibilityEvent(AccessibilityEvent event) {
-        if (event != null && event.getPackageName() != null) {
-            lastPackage = event.getPackageName().toString();
+        if (event == null || event.getPackageName() == null) return;
+        String current = event.getPackageName().toString();
+        if (!current.equals(lastPackage)) {
+            lastPackage = current;
+            try {
+                EventDispatcher.dispatch(this, "foreground_app",
+                        new JSONObject()
+                                .put("package", current)
+                                .put("accessibility_event_type", event.getEventType()));
+            } catch (Throwable ignored) {
+            }
         }
     }
 
@@ -44,8 +61,55 @@ public class BridgeAccessibilityService extends AccessibilityService {
 
     @Override
     public void onDestroy() {
+        unregisterDeviceEvents();
         instance = null;
         super.onDestroy();
+    }
+
+    private void registerDeviceEvents() {
+        if (screenReceiver != null) return;
+
+        screenReceiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                if (intent == null || intent.getAction() == null) return;
+                String event;
+                switch (intent.getAction()) {
+                    case Intent.ACTION_SCREEN_ON:
+                        event = "screen_on";
+                        break;
+                    case Intent.ACTION_SCREEN_OFF:
+                        event = "screen_off";
+                        break;
+                    case Intent.ACTION_USER_PRESENT:
+                        event = "user_present";
+                        break;
+                    default:
+                        return;
+                }
+                EventDispatcher.dispatch(context, event, new JSONObject());
+            }
+        };
+
+        IntentFilter filter = new IntentFilter();
+        filter.addAction(Intent.ACTION_SCREEN_ON);
+        filter.addAction(Intent.ACTION_SCREEN_OFF);
+        filter.addAction(Intent.ACTION_USER_PRESENT);
+
+        if (Build.VERSION.SDK_INT >= 33) {
+            registerReceiver(screenReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
+        } else {
+            registerReceiver(screenReceiver, filter);
+        }
+    }
+
+    private void unregisterDeviceEvents() {
+        if (screenReceiver == null) return;
+        try {
+            unregisterReceiver(screenReceiver);
+        } catch (Throwable ignored) {
+        }
+        screenReceiver = null;
     }
 
     public String currentPackage() {
@@ -62,7 +126,12 @@ public class BridgeAccessibilityService extends AccessibilityService {
         String action = c.optString("action", "");
         switch (action) {
             case "status":
-                return ok().put("service_connected", true).put("package", currentPackage()).put("bridge_version", "0.1.0");
+                return ok()
+                        .put("service_connected", true)
+                        .put("package", currentPackage())
+                        .put("bridge_version", "0.2.0")
+                        .put("termux_run_permission", EventDispatcher.hasRunCommandPermission(this))
+                        .put("notification_listener_connected", NotificationBridgeService.isConnected());
             case "dump":
                 return dump(c.optInt("max_nodes", 300));
             case "click_text":
