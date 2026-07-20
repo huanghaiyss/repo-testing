@@ -29,7 +29,7 @@ public class NotificationBridgeService extends NotificationListenerService {
 
     @Override
     public void onNotificationPosted(StatusBarNotification sbn) {
-        if (sbn == null) return;
+        if (shouldIgnore(sbn)) return;
         try {
             Notification n = sbn.getNotification();
             Bundle extras = n == null ? Bundle.EMPTY : n.extras;
@@ -46,7 +46,8 @@ public class NotificationBridgeService extends NotificationListenerService {
                     .put("sub_text", value(extras.getCharSequence(Notification.EXTRA_SUB_TEXT)))
                     .put("summary_text", value(extras.getCharSequence(Notification.EXTRA_SUMMARY_TEXT)))
                     .put("category", n == null || n.category == null ? "" : n.category)
-                    .put("channel_id", n == null || n.getChannelId() == null ? "" : n.getChannelId());
+                    .put("channel_id", n == null || n.getChannelId() == null ? "" : n.getChannelId())
+                    .put("ongoing", false);
 
             EventDispatcher.dispatch(this, "notification_posted", data);
         } catch (Throwable ignored) {
@@ -55,6 +56,7 @@ public class NotificationBridgeService extends NotificationListenerService {
 
     @Override
     public void onNotificationRemoved(StatusBarNotification sbn) {
+        if (shouldIgnorePackage(sbn == null ? null : sbn.getPackageName())) return;
         if (sbn == null) return;
         try {
             JSONObject data = new JSONObject()
@@ -71,6 +73,18 @@ public class NotificationBridgeService extends NotificationListenerService {
     public void onDestroy() {
         connected = false;
         super.onDestroy();
+    }
+
+    private boolean shouldIgnore(StatusBarNotification sbn) {
+        if (sbn == null || shouldIgnorePackage(sbn.getPackageName())) return true;
+        Notification notification = sbn.getNotification();
+        return notification != null &&
+                (notification.flags & Notification.FLAG_ONGOING_EVENT) != 0;
+    }
+
+    private boolean shouldIgnorePackage(String packageName) {
+        if (packageName == null) return true;
+        return packageName.equals(getPackageName()) || packageName.startsWith("com.termux");
     }
 
     private static String value(CharSequence value) {
