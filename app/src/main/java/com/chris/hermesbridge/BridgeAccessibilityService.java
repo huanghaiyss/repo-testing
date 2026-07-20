@@ -146,7 +146,7 @@ public class BridgeAccessibilityService extends AccessibilityService {
                         .put("package", currentPackage())
                         .put("activity", currentActivity())
                         .put("foreground", !currentPackage().isEmpty())
-                        .put("bridge_version", "0.3.0")
+                        .put("bridge_version", "0.3.1")
                         .put("transport", "loopback_http")
                         .put("transport_port", BridgeHttpServer.PORT)
                         .put("termux_run_permission", EventDispatcher.hasRunCommandPermission(this))
@@ -211,7 +211,8 @@ public class BridgeAccessibilityService extends AccessibilityService {
 
     private JSONObject findSelector(JSONObject selector) throws Exception {
         if (selector == null) return error("missing_selector", "selector is required");
-        JSONObject all = dump(1000);
+        int max = selector.optInt("_max_nodes", 300);
+        JSONObject all = dump(max);
         JSONArray matches = new JSONArray();
         JSONArray nodes = all.optJSONArray("nodes");
         if (nodes != null) for (int i = 0; i < nodes.length(); i++) {
@@ -358,7 +359,7 @@ public class BridgeAccessibilityService extends AccessibilityService {
             main.post(() -> {
                 try { result.set(task.run()); } catch (Throwable e) { failure.set(e); } finally { latch.countDown(); }
             });
-            if (!latch.await(12, TimeUnit.SECONDS)) return error("timeout", "Accessibility operation timed out");
+            if (!latch.await(25, TimeUnit.SECONDS)) return error("timeout", "Accessibility operation timed out");
             if (failure.get() != null) return error("operation_failed", failure.get().getClass().getSimpleName() + ": " + failure.get().getMessage());
             return result.get();
         } catch (Throwable e) {

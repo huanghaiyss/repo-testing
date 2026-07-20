@@ -66,7 +66,7 @@ public final class BridgeHttpServer {
 
     private void handle(Socket socket) {
         try (Socket s = socket) {
-            s.setSoTimeout(15000);
+            s.setSoTimeout(30000);
             BufferedReader reader = new BufferedReader(new InputStreamReader(s.getInputStream(), StandardCharsets.UTF_8));
             String requestLine = reader.readLine();
             if (requestLine == null || !requestLine.startsWith("POST /rpc ")) {
