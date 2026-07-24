@@ -128,9 +128,10 @@ public class BridgeAccessibilityService extends AccessibilityService {
     }
 
     public String currentPackage() {
+        if (!lastPackage.isEmpty()) return lastPackage;
         AccessibilityNodeInfo root = getRootInActiveWindow();
         if (root != null && root.getPackageName() != null) return root.getPackageName().toString();
-        return lastPackage;
+        return "";
     }
 
     public String currentActivity() { return lastActivity; }
