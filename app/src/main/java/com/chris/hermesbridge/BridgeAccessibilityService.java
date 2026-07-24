@@ -12,6 +12,8 @@ import android.graphics.Path;
 import android.graphics.Rect;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.PowerManager;
+import android.app.KeyguardManager;
 import android.os.Handler;
 import android.os.Looper;
 import android.view.accessibility.AccessibilityEvent;
@@ -151,6 +153,8 @@ public class BridgeAccessibilityService extends AccessibilityService {
                         .put("transport_port", BridgeHttpServer.PORT)
                         .put("termux_run_permission", EventDispatcher.hasRunCommandPermission(this))
                         .put("notification_listener_connected", NotificationBridgeService.isConnected());
+            case "device_state":
+                return deviceState();
             case "dump":
                 return dump(c.optInt("max_nodes", 300));
             case "launch_app":
@@ -176,6 +180,19 @@ public class BridgeAccessibilityService extends AccessibilityService {
         }
     }
 
+    private JSONObject deviceState() throws Exception {
+        PowerManager power = (PowerManager) getSystemService(Context.POWER_SERVICE);
+        KeyguardManager keyguard = (KeyguardManager) getSystemService(Context.KEYGUARD_SERVICE);
+        boolean screenOn = power != null && (Build.VERSION.SDK_INT >= 20 ? power.isInteractive() : power.isScreenOn());
+        boolean locked = keyguard != null && keyguard.isKeyguardLocked();
+        return ok()
+                .put("screen_on", screenOn)
+                .put("keyguard_locked", locked)
+                .put("device_unlocked", !locked)
+                .put("package", currentPackage())
+                .put("activity", currentActivity());
+    }
+
     private JSONObject dump(int requestedMax) throws Exception {
         AccessibilityNodeInfo root = getRootInActiveWindow();
         if (root == null) return error("no_active_window", "No active accessibility window");
@@ -190,6 +207,10 @@ public class BridgeAccessibilityService extends AccessibilityService {
     private JSONObject launchApp(String packageName) throws Exception {
         if (packageName.isEmpty()) return error("missing_package", "package is required");
         Intent intent = getPackageManager().getLaunchIntentForPackage(packageName);
+        if (intent == null && "com.tencent.wework".equals(packageName)) {
+            // Some Android work-profile builds return null despite the exported launcher.
+            intent = new Intent().setComponent(new ComponentName(packageName, packageName + ".launch.LaunchSplashActivity"));
+        }
         if (intent == null) return error("launch_intent_unavailable", "No exported launcher activity for " + packageName);
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
         startActivity(intent);
